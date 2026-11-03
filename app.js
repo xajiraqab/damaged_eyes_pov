@@ -5,6 +5,7 @@ const valueLabel = document.querySelector("#diopterValue");
 const stage = document.querySelector("#cameraStage");
 const video = document.querySelector("#camera");
 const startButton = document.querySelector("#startCamera");
+const cameraSwitch = document.querySelector("#cameraSwitch");
 const githubButton = document.querySelector("#githubButton");
 const themeToggle = document.querySelector("#themeToggle");
 const toast = document.querySelector("#toast");
@@ -12,6 +13,7 @@ const diopterStorageKey = "damagedEyesPov.diopter";
 const themeStorageKey = "damagedEyesPov.theme";
 
 let stream = null;
+let facingMode = "environment";
 let toastTimer;
 
 function updateSimulation() {
@@ -53,11 +55,12 @@ async function startCamera() {
     stream?.getTracks().forEach((track) => track.stop());
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { facingMode: { ideal: "user" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
     });
     video.srcObject = stream;
     await video.play();
     stage.classList.add("is-live");
+    stage.classList.toggle("is-front-camera", facingMode === "user");
   } catch (error) {
     const message = error.name === "NotAllowedError"
       ? "Camera access was denied. Allow camera access in your browser settings."
@@ -111,6 +114,11 @@ slider.parentElement.addEventListener("wheel", (event) => {
   slider.dispatchEvent(new Event("input", { bubbles: true }));
 }, { passive: false });
 startButton.addEventListener("click", startCamera);
+cameraSwitch.addEventListener("click", () => {
+  if (!stream) return;
+  facingMode = facingMode === "environment" ? "user" : "environment";
+  startCamera();
+});
 githubButton.addEventListener("click", () => showToast("GitHub link coming soon."));
 function setTheme(theme) {
   const isLight = theme === "light";

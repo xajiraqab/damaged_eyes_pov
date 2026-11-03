@@ -3,8 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#090b10" />
-    <meta name="description" content="Damaged Eyes POV — a visual acuity simulator." />
+    <meta name="theme-color" content="#0d1117" />
+    <meta name="description" content="Explore how positive and negative diopter values affect a live camera view with Damaged Eyes POV, a browser-based vision simulator." />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:site_name" content="Damaged Eyes POV" />
+    <meta property="og:title" content="Damaged Eyes POV — Live Vision Simulator" />
+    <meta property="og:description" content="Explore how positive and negative diopter values affect a live camera view." />
+    <meta property="og:image" content="og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Damaged Eyes POV live vision simulator" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Damaged Eyes POV — Live Vision Simulator" />
+    <meta name="twitter:description" content="Explore how positive and negative diopter values affect a live camera view." />
+    <meta name="twitter:image" content="og-image.png" />
+    <meta name="twitter:image:alt" content="Damaged Eyes POV live vision simulator" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Damaged Eyes POV",
+        "description": "A browser-based vision simulator that applies adjustable diopter effects to a live camera preview.",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Any",
+        "browserRequirements": "Requires HTTPS or localhost and camera permission"
+      }
+    </script>
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <title>Damaged Eyes POV</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -16,7 +42,7 @@
   <body>
     <main class="app-shell">
       <header class="topbar">
-        <div class="brand"><img src="favicon.svg" alt="" /><span>Damaged Eyes POV</span></div>
+        <h1 class="brand"><img src="favicon.svg" alt="" /><span>Damaged Eyes POV</span></h1>
         <div class="header-actions">
           <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch to light mode" title="Switch to light mode">
             <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>
@@ -34,6 +60,10 @@
           <button class="start-button" id="startCamera" type="button">Turn on camera</button>
         </div>
         <div class="camera-shade" aria-hidden="true"></div>
+        <button class="camera-switch" id="cameraSwitch" type="button" aria-label="Switch camera" title="Switch camera">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10l2 2h2v9H3V9h2l2-2Zm5 2.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/></svg>
+          <span>Switch camera</span>
+        </button>
       </section>
       <footer class="control-panel" aria-label="Diopter control">
         <div class="control-heading"><label for="diopter">Diopter simulation</label><span class="diopter-pill"><span id="diopterValue">−2.00</span><small>D</small></span></div>
