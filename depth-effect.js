@@ -64,8 +64,12 @@ export async function createDepthEffect(photoCanvas, blurredPhoto, stage, getDio
     const image = maskContext.createImageData(maskWidth, maskHeight);
     // Use a narrow depth transition to avoid ghosting from a broad blend of
     // sharp and blurred copies. Spatial feathering below softens object edges.
-    const cutoff = diopters < 0 ? 96 + amount * 42 : 159 - amount * 42;
-    const feather = 8 + amount * 4;
+    // Expand the affected depth band on both sides of zero so near blur for
+    // positive values and far blur for negative values do not become thin,
+    // isolated strips beside abruptly sharp areas.
+    const depthShift = 75 * Math.pow(amount, 0.7);
+    const cutoff = diopters < 0 ? 96 + depthShift : 159 - depthShift;
+    const feather = 10 + amount * 10;
     for (let i = 0; i < maskPixels.length; i++) {
       const near = maskPixels[i];
       const focus = smoothstep(cutoff - feather, cutoff + feather, near);
