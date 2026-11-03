@@ -1,6 +1,5 @@
-const MAX_OUTPUT_EDGE = 720;
 const MAX_INFERENCE_EDGE = 336;
-const INFERENCE_INTERVAL_MS = 850;
+const INFERENCE_INTERVAL_MS = 1800;
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const smoothstep = (edge0, edge1, value) => {
@@ -8,8 +7,18 @@ const smoothstep = (edge0, edge1, value) => {
   return t * t * (3 - 2 * t);
 };
 
-export async function createDepthEffect(video, outputCanvas, getDiopters, isMirrored, onStatus = () => {}) {
+export async function createDepthEffect(video, blurVideo, stage, getDiopters, onStatus = () => {}) {
   const worker = new Worker(new URL("./depth-worker.js", import.meta.url), { type: "module" });
+  const inferenceScale = Math.min(1, MAX_INFERENCE_EDGE / Math.max(video.videoWidth, video.videoHeight));
+  const inferenceWidth = Math.max(14, Math.round(video.videoWidth * inferenceScale / 14) * 14);
+  const inferenceHeight = Math.max(14, Math.round(video.videoHeight * inferenceScale / 14) * 14);
+  const inferenceCanvas = document.createElement("canvas");
+  inferenceCanvas.width = inferenceWidth;
+  inferenceCanvas.height = inferenceHeight;
+  const inferenceContext = inferenceCanvas.getContext("2d", { willReadFrequently: true });
+  const maskCanvas = document.createElement("canvas");
+  const maskContext = maskCanvas.getContext("2d");
+
   let stopped = false;
   let inferenceBusy = false;
   let lastInferenceAt = 0;
@@ -18,11 +27,13 @@ export async function createDepthEffect(video, outputCanvas, getDiopters, isMirr
   let depthHeight = 0;
   let smoothedAlpha = null;
   let diopters = getDiopters();
-  let frameRequest = 0;
-  let lastRenderedAt = 0;
+  let firstMaskUrl = null;
+  let maskVersion = 0;
+  let lastStatus = "";
   let resolveFirstDepth;
   let rejectFirstDepth;
-  let lastStatus = "";
+  let inferenceTimer = 0;
+  let maskUpdateTimer = 0;
 
   const report = (message) => {
     if (message !== lastStatus) {
@@ -30,68 +41,23 @@ export async function createDepthEffect(video, outputCanvas, getDiopters, isMirr
       onStatus(message);
     }
   };
-
   const firstDepth = new Promise((resolve, reject) => {
     resolveFirstDepth = resolve;
     rejectFirstDepth = reject;
   });
-  const modelReady = new Promise((resolve, reject) => {
-    worker.addEventListener("message", function onReady(event) {
-      const message = event.data;
-      if (message.type === "ready") {
-        worker.removeEventListener("message", onReady);
-        resolve();
-      } else if (message.type === "error") {
-        worker.removeEventListener("message", onReady);
-        reject(new Error(message.message));
-      } else if (message.type === "status") {
-        report(message.message);
-      } else if (message.type === "progress") {
-        report(`Loading depth model… ${Math.round(message.progress)}%`);
-      }
-    });
-    worker.addEventListener("error", (event) => reject(new Error(event.message || "Depth worker failed to start")), { once: true });
-  });
 
-  if (!video.videoWidth || !video.videoHeight) {
-    await new Promise((resolve) => video.addEventListener("loadedmetadata", resolve, { once: true }));
-  }
-
-  const outputScale = Math.min(1, MAX_OUTPUT_EDGE / Math.max(video.videoWidth, video.videoHeight));
-  const width = Math.max(2, Math.round(video.videoWidth * outputScale));
-  const height = Math.max(2, Math.round(video.videoHeight * outputScale));
-  outputCanvas.width = width;
-  outputCanvas.height = height;
-  const outputContext = outputCanvas.getContext("2d", { alpha: false });
-
-  const blurredCanvas = document.createElement("canvas");
-  blurredCanvas.width = width;
-  blurredCanvas.height = height;
-  const blurredContext = blurredCanvas.getContext("2d");
-
-  const maskCanvas = document.createElement("canvas");
-  const maskContext = maskCanvas.getContext("2d");
-
-  const inferenceScale = Math.min(1, MAX_INFERENCE_EDGE / Math.max(video.videoWidth, video.videoHeight));
-  const inferenceWidth = Math.max(14, Math.round(video.videoWidth * inferenceScale / 14) * 14);
-  const inferenceHeight = Math.max(14, Math.round(video.videoHeight * inferenceScale / 14) * 14);
-  const inferenceCanvas = document.createElement("canvas");
-  inferenceCanvas.width = inferenceWidth;
-  inferenceCanvas.height = inferenceHeight;
-  const inferenceContext = inferenceCanvas.getContext("2d", { willReadFrequently: true });
-
-  function drawCameraFrame(context, targetWidth, targetHeight) {
-    context.save();
-    if (isMirrored()) {
-      context.translate(targetWidth, 0);
-      context.scale(-1, 1);
-    }
-    context.drawImage(video, 0, 0, targetWidth, targetHeight);
-    context.restore();
+  function updateBlur() {
+    const amount = Math.abs(diopters) / 10;
+    const radius = Math.pow(amount, 1.15) * 7;
+    stage.style.setProperty("--depth-blur", `${radius.toFixed(2)}px`);
   }
 
   function updateMask() {
-    if (!relativeDepth) return;
+    if (!relativeDepth || diopters === 0) {
+      stage.style.setProperty("--depth-mask", "none");
+      return;
+    }
+
     const amount = Math.abs(diopters) / 10;
     const count = depthWidth * depthHeight;
     let min = 255;
@@ -103,12 +69,12 @@ export async function createDepthEffect(video, outputCanvas, getDiopters, isMirr
     const span = Math.max(1, max - min);
     const image = maskContext.createImageData(depthWidth, depthHeight);
     if (!smoothedAlpha || smoothedAlpha.length !== count) smoothedAlpha = new Float32Array(count);
-
     const cutoff = diopters > 0 ? 0.82 - amount * 0.42 : 0.18 + amount * 0.46;
+
     for (let i = 0; i < count; i += 1) {
       const nearScore = (relativeDepth[i] - min) / span;
       const nearWeight = smoothstep(cutoff - 0.06, cutoff + 0.06, nearScore);
-      const target = diopters < 0 ? 1 - nearWeight : diopters > 0 ? nearWeight : 0;
+      const target = diopters < 0 ? 1 - nearWeight : nearWeight;
       const alpha = smoothedAlpha[i] * 0.55 + target * 0.45;
       smoothedAlpha[i] = alpha;
       const offset = i * 4;
@@ -117,9 +83,23 @@ export async function createDepthEffect(video, outputCanvas, getDiopters, isMirr
       image.data[offset + 2] = 255;
       image.data[offset + 3] = Math.round(alpha * 255);
     }
+
     maskCanvas.width = depthWidth;
     maskCanvas.height = depthHeight;
     maskContext.putImageData(image, 0, 0);
+    const version = ++maskVersion;
+    maskCanvas.toBlob((blob) => {
+      if (!blob || stopped || version !== maskVersion || diopters === 0) return;
+      const nextUrl = URL.createObjectURL(blob);
+      const previousUrl = firstMaskUrl;
+      firstMaskUrl = nextUrl;
+      stage.style.setProperty("--depth-mask", `url("${nextUrl}")`);
+      if (previousUrl) setTimeout(() => URL.revokeObjectURL(previousUrl), 1500);
+    }, "image/png");
+  }
+
+  function drawInferenceFrame() {
+    inferenceContext.drawImage(video, 0, 0, inferenceWidth, inferenceHeight);
   }
 
   function handleWorkerMessage(event) {
@@ -151,6 +131,24 @@ export async function createDepthEffect(video, outputCanvas, getDiopters, isMirr
       resolveFirstDepth = null;
     }
   }
+
+  const modelReady = new Promise((resolve, reject) => {
+    worker.addEventListener("message", function onReady(event) {
+      if (event.data.type === "ready") {
+        worker.removeEventListener("message", onReady);
+        resolve();
+      } else if (event.data.type === "error") {
+        worker.removeEventListener("message", onReady);
+        reject(new Error(event.data.message));
+      } else if (event.data.type === "status") {
+        report(event.data.message);
+      } else if (event.data.type === "progress") {
+        report(`Loading depth model… ${Math.round(event.data.progress)}%`);
+      }
+    });
+    worker.addEventListener("error", (event) => reject(new Error(event.message || "Depth worker failed to start")), { once: true });
+  });
+
   worker.addEventListener("message", handleWorkerMessage);
   worker.postMessage({ type: "init", preferWebGPU: Boolean(navigator.gpu) });
   report("Loading the depth model on this device…");
@@ -160,40 +158,19 @@ export async function createDepthEffect(video, outputCanvas, getDiopters, isMirr
     worker.terminate();
     throw error;
   }
-  report("Estimating scene depth…");
 
   function estimateFrame() {
-    if (stopped || inferenceBusy || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    if (stopped || inferenceBusy || diopters === 0 || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
     inferenceBusy = true;
-    drawCameraFrame(inferenceContext, inferenceWidth, inferenceHeight);
+    drawInferenceFrame();
     const frame = inferenceContext.getImageData(0, 0, inferenceWidth, inferenceHeight);
     lastInferenceAt = performance.now();
     worker.postMessage({ type: "frame", pixels: frame.data.buffer, width: inferenceWidth, height: inferenceHeight }, [frame.data.buffer]);
   }
 
-  function render(now) {
-    if (stopped) return;
-    if (now - lastRenderedAt >= 42 && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-      lastRenderedAt = now;
-      drawCameraFrame(outputContext, width, height);
-      if (relativeDepth && Math.abs(diopters) > 0) {
-        const amount = Math.abs(diopters) / 10;
-        blurredContext.clearRect(0, 0, width, height);
-        blurredContext.filter = `blur(${(Math.pow(amount, 1.15) * Math.min(10, width * 0.014)).toFixed(2)}px)`;
-        drawCameraFrame(blurredContext, width, height);
-        blurredContext.filter = "none";
-        blurredContext.globalCompositeOperation = "destination-in";
-        blurredContext.drawImage(maskCanvas, 0, 0, width, height);
-        blurredContext.globalCompositeOperation = "source-over";
-        outputContext.drawImage(blurredCanvas, 0, 0);
-      }
-      if (Math.abs(diopters) > 0 && !inferenceBusy && now - lastInferenceAt >= INFERENCE_INTERVAL_MS) estimateFrame();
-    }
-    frameRequest = requestAnimationFrame(render);
-  }
-
+  report("Estimating scene depth…");
+  estimateFrame();
   try {
-    estimateFrame();
     await firstDepth;
   } catch (error) {
     worker.terminate();
@@ -203,24 +180,28 @@ export async function createDepthEffect(video, outputCanvas, getDiopters, isMirr
     worker.terminate();
     throw new Error("Depth simulation stopped before startup finished.");
   }
-  if (Math.abs(diopters) > 0) frameRequest = requestAnimationFrame(render);
+
+  inferenceTimer = window.setInterval(() => {
+    if (diopters !== 0 && !inferenceBusy && performance.now() - lastInferenceAt >= INFERENCE_INTERVAL_MS) estimateFrame();
+  }, 250);
 
   return {
     setDiopters(value) {
       diopters = Number(value) || 0;
-      updateMask();
-      if (Math.abs(diopters) === 0) {
-        cancelAnimationFrame(frameRequest);
-        frameRequest = 0;
-        return;
-      }
-      if (!relativeDepth) estimateFrame();
-      if (!frameRequest) frameRequest = requestAnimationFrame(render);
+      updateBlur();
+      clearTimeout(maskUpdateTimer);
+      if (diopters === 0) updateMask();
+      else maskUpdateTimer = window.setTimeout(updateMask, 100);
+      if (diopters !== 0 && !relativeDepth) estimateFrame();
+      else if (diopters !== 0 && performance.now() - lastInferenceAt >= INFERENCE_INTERVAL_MS) estimateFrame();
     },
     stop() {
       stopped = true;
-      cancelAnimationFrame(frameRequest);
+      clearInterval(inferenceTimer);
+      clearTimeout(maskUpdateTimer);
       worker.terminate();
+      stage.style.setProperty("--depth-mask", "none");
+      if (firstMaskUrl) URL.revokeObjectURL(firstMaskUrl);
     },
   };
 }

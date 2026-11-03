@@ -4,7 +4,7 @@ const sliderThumb = document.querySelector("#sliderThumb");
 const valueLabel = document.querySelector("#diopterValue");
 const stage = document.querySelector("#cameraStage");
 const video = document.querySelector("#camera");
-const depthCanvas = document.querySelector("#depthCanvas");
+const blurVideo = document.querySelector("#blurCamera");
 const depthStatus = document.querySelector("#depthStatus");
 const startButton = document.querySelector("#startCamera");
 const cameraSwitch = document.querySelector("#cameraSwitch");
@@ -62,7 +62,8 @@ async function startCamera() {
       video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
     });
     video.srcObject = stream;
-    await video.play();
+    blurVideo.srcObject = stream;
+    await Promise.all([video.play(), blurVideo.play()]);
     stage.classList.add("is-live");
     stage.classList.toggle("is-front-camera", facingMode === "user");
     if (Number(slider.value) !== 0) ensureDepthSimulation();
@@ -88,9 +89,9 @@ async function startDepthSimulation(cameraStream) {
     const { createDepthEffect } = await import("./depth-effect.js");
     const controller = await createDepthEffect(
       video,
-      depthCanvas,
+      blurVideo,
+      stage,
       () => Number(slider.value),
-      () => facingMode === "user",
       (message) => { depthStatus.textContent = message; },
     );
     if (stream !== cameraStream) {

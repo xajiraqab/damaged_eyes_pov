@@ -55,7 +55,7 @@
       </header>
       <section class="camera-stage" id="cameraStage" aria-label="Camera view">
         <video id="camera" playsinline autoplay muted aria-label="Live camera view"></video>
-        <canvas class="depth-canvas" id="depthCanvas" aria-label="Depth-aware camera simulation"></canvas>
+        <video class="depth-blur-video" id="blurCamera" playsinline autoplay muted aria-hidden="true"></video>
         <div class="camera-placeholder" id="placeholder">
           <p>Turn on your camera to start the simulation</p>
           <button class="start-button" id="startCamera" type="button">Turn on camera</button>
