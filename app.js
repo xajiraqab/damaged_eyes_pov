@@ -8,8 +8,6 @@ const capturedPhoto = document.querySelector("#capturedPhoto");
 const blurredPhoto = document.querySelector("#blurredPhoto");
 const depthStatus = document.querySelector("#depthStatus");
 const loadingOverlay = document.querySelector("#loadingOverlay");
-const loadingMessage = document.querySelector("#loadingMessage");
-const loadingProgress = document.querySelector("#loadingProgress");
 const focusIndicator = document.querySelector("#focusIndicator");
 const startButton = document.querySelector("#startCamera");
 const captureButton = document.querySelector("#capturePhoto");
@@ -53,12 +51,9 @@ function showToast(message) {
   toastTimer = setTimeout(() => toast.classList.remove("visible"), 10000);
 }
 
-function setLoading(visible, message = "Estimating scene depth…") {
+function setLoading(visible) {
   loadingOverlay.classList.toggle("is-visible", visible);
   loadingOverlay.setAttribute("aria-hidden", String(!visible));
-  loadingMessage.textContent = message;
-  loadingOverlay.classList.remove("has-progress");
-  loadingProgress.style.width = "8%";
 }
 
 function stopPhotoEffect() {
@@ -125,7 +120,7 @@ async function capturePhoto() {
     video.srcObject = null;
     stream.getTracks().forEach((track) => track.stop()); stream = null;
     controls.hidden = false;
-    depthStatus.textContent = "Estimating scene depth…";
+    depthStatus.textContent = "";
     setLoading(true, "Loading the vision model for this photo…");
     ensureDepthSimulation();
   } catch (error) { showToast(error.message || "Could not capture this photo."); }
@@ -135,26 +130,18 @@ async function capturePhoto() {
 async function startDepthSimulation(frame, version) {
   try {
     const { createDepthEffect } = await import("./depth-effect.js");
-    const controller = await createDepthEffect(frame, blurredPhoto, stage, () => Number(slider.value), (message) => {
-      depthStatus.textContent = message;
-      const percent = Number(message.match(/(\d+(?:\.\d+)?)%/)?.[1]);
-      if (Number.isFinite(percent)) {
-        loadingOverlay.classList.add("has-progress");
-        loadingMessage.textContent = message;
-        loadingProgress.style.width = `${Math.max(4, Math.min(100, percent))}%`;
-      } else loadingMessage.textContent = message;
-    }, depthAbort?.signal);
+    const controller = await createDepthEffect(frame, blurredPhoto, stage, () => Number(slider.value), () => {}, depthAbort?.signal);
     if (captureVersion !== version || photoFrame !== frame) { controller.stop(); return; }
     depthController = controller;
     depthController.setDiopters(Number(slider.value));
-    depthStatus.textContent = "Scene depth ready — adjust the diopter";
+    depthStatus.textContent = "";
     setLoading(false);
     stage.classList.toggle("is-depth-active", Number(slider.value) !== 0);
   } catch (error) {
     console.error("Depth estimation could not start:", error);
     if (captureVersion === version) {
       depthFailed = true;
-      depthStatus.textContent = "Depth estimation unavailable — check your internet connection";
+      depthStatus.textContent = "";
       setLoading(false);
       showToast("Could not estimate the photo's depth. Check your connection and retake the photo.");
     }
