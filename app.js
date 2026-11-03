@@ -33,6 +33,7 @@ function updateSimulation() {
   sliderVisual.style.setProperty("--thumb-position", `${position}%`);
 
   depthController?.setDiopters(diopters);
+  if (depthController) stage.classList.toggle("is-depth-active", diopters !== 0);
 }
 
 function showToast(message) {
@@ -97,7 +98,9 @@ async function startDepthSimulation(cameraStream) {
       return;
     }
     depthController = controller;
-    stage.classList.add("is-depth-active");
+    const currentDiopters = Number(slider.value);
+    depthController.setDiopters(currentDiopters);
+    stage.classList.toggle("is-depth-active", currentDiopters !== 0);
   } catch (error) {
     console.error("Depth estimation could not start:", error);
     if (stream === cameraStream) {
