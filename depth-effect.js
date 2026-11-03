@@ -69,7 +69,7 @@ export async function createDepthEffect(photoCanvas, blurredPhoto, stage, getDio
     // isolated strips beside abruptly sharp areas.
     const depthShift = 75 * Math.pow(amount, 0.7);
     const cutoff = diopters < 0 ? 96 + depthShift : 159 - depthShift;
-    const feather = 10 + amount * 10;
+    const feather = 24 + amount * 16;
     for (let i = 0; i < maskPixels.length; i++) {
       const near = maskPixels[i];
       const focus = smoothstep(cutoff - feather, cutoff + feather, near);
@@ -93,6 +93,7 @@ export async function createDepthEffect(photoCanvas, blurredPhoto, stage, getDio
       if (!blob || stopped || current !== version) return;
       const next = URL.createObjectURL(blob); const previous = maskUrl; maskUrl = next;
       stage.style.setProperty("--depth-mask", `url("${next}")`);
+      stage.classList.add("is-depth-active");
       if (previous) URL.revokeObjectURL(previous);
     }, "image/png");
   }
@@ -101,9 +102,9 @@ export async function createDepthEffect(photoCanvas, blurredPhoto, stage, getDio
     setDiopters(value) {
       diopters = Number(value) || 0;
       clearTimeout(maskTimer);
-      if (diopters === 0) updateMask();
+      if (diopters === 0) { stage.classList.remove("is-depth-active"); updateMask(); }
       else maskTimer = window.setTimeout(updateMask, 45);
     },
-    stop() { stopped = true; clearTimeout(maskTimer); signal?.removeEventListener("abort", abort); worker.terminate(); stage.style.setProperty("--depth-mask", "none"); if (maskUrl) URL.revokeObjectURL(maskUrl); },
+    stop() { stopped = true; clearTimeout(maskTimer); signal?.removeEventListener("abort", abort); worker.terminate(); stage.classList.remove("is-depth-active"); stage.style.setProperty("--depth-mask", "none"); if (maskUrl) URL.revokeObjectURL(maskUrl); },
   };
 }

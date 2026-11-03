@@ -41,7 +41,7 @@ function updateSimulation() {
   sliderVisual.style.setProperty("--fill-size", `${Math.abs(position - 50)}%`);
   sliderVisual.style.setProperty("--thumb-position", `${position}%`);
   depthController?.setDiopters(diopters);
-  stage.classList.toggle("is-depth-active", Boolean(photoFrame && depthController && diopters !== 0));
+  if (diopters === 0) stage.classList.remove("is-depth-active");
 }
 
 function showToast(message) {
@@ -136,7 +136,6 @@ async function startDepthSimulation(frame, version) {
     depthController.setDiopters(Number(slider.value));
     depthStatus.textContent = "";
     setLoading(false);
-    stage.classList.toggle("is-depth-active", Number(slider.value) !== 0);
   } catch (error) {
     console.error("Depth estimation could not start:", error);
     if (captureVersion === version) {

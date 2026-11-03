@@ -60,7 +60,7 @@ html[data-theme="light"] .camera-stage { background: #d7dadd; }
 .camera-stage.is-captured video { opacity: 0; }
 .captured-photo, .blurred-photo { position: absolute; inset: 0; display: none; width: 100%; height: 100%; object-fit: cover; }
 .camera-stage.is-captured .captured-photo { z-index: 0; display: block; }
-.blurred-photo { z-index: 1; filter: blur(var(--depth-blur, 0px)); -webkit-mask-image: var(--depth-mask, none); mask-image: var(--depth-mask, none); -webkit-mask-size: cover; mask-size: cover; -webkit-mask-position: center; mask-position: center; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
+.blurred-photo { z-index: 1; filter: blur(var(--depth-blur, 0px)); transition: filter .22s ease; -webkit-mask-image: var(--depth-mask, none); mask-image: var(--depth-mask, none); -webkit-mask-size: cover; mask-size: cover; -webkit-mask-position: center; mask-position: center; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
 .camera-stage.is-captured.is-depth-active .blurred-photo { display: block; }
 .camera-shade { position: absolute; z-index: 2; inset: 0; pointer-events: none; background: linear-gradient(180deg, #0005, transparent 24%, transparent 72%, #0006); }
 .depth-status { position: absolute; z-index: 2; left: 12px; bottom: 12px; display: none; max-width: calc(100% - 155px); padding: 7px 10px; border: 1px solid #ffffff2a; border-radius: 7px; background: #0d1117cc; color: #f0f3f6; font-size: 10px; line-height: 1.4; backdrop-filter: blur(8px); }
