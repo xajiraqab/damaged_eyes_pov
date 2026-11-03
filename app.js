@@ -76,11 +76,14 @@ async function startCamera() {
     showToast("Camera access needs HTTPS, or localhost on this device."); return;
   }
   startButton.disabled = true; startButton.textContent = "Starting camera…";
+  cameraSwitch.disabled = true;
+  stage.classList.add("is-camera-loading");
   stopPhotoEffect();
   setLoading(false);
   controls.hidden = true;
   stage.classList.remove("is-captured", "is-live", "is-depth-active");
   stream?.getTracks().forEach((track) => track.stop()); stream = null;
+  video.srcObject = null;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -93,11 +96,14 @@ async function startCamera() {
     depthStatus.textContent = "";
   } catch (error) {
     stream?.getTracks().forEach((track) => track.stop()); stream = null;
+    video.srcObject = null;
     const message = error.name === "NotAllowedError"
       ? "Camera access was denied. Allow camera access in your browser settings."
       : error.name === "NotFoundError" ? "No camera was found on this device." : "Could not start the camera. Please try again.";
     showToast(message);
   } finally {
+    stage.classList.remove("is-camera-loading");
+    cameraSwitch.disabled = false;
     startButton.disabled = false; startButton.textContent = "Turn on camera";
   }
 }
