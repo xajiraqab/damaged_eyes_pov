@@ -4,6 +4,8 @@ const sliderThumb = document.querySelector("#sliderThumb");
 const valueLabel = document.querySelector("#diopterValue");
 const stage = document.querySelector("#cameraStage");
 const video = document.querySelector("#camera");
+const depthCanvas = document.querySelector("#depthCanvas");
+const depthStatus = document.querySelector("#depthStatus");
 const startButton = document.querySelector("#startCamera");
 const cameraSwitch = document.querySelector("#cameraSwitch");
 const githubButton = document.querySelector("#githubButton");
@@ -14,11 +16,13 @@ const themeStorageKey = "damagedEyesPov.theme";
 
 let stream = null;
 let facingMode = "environment";
+let depthController = null;
+let depthPromise = null;
+let depthFailed = false;
 let toastTimer;
 
 function updateSimulation() {
   const diopters = Number(slider.value);
-  const amount = Math.abs(diopters) / 10;
   const formattedDiopters = Math.abs(diopters).toFixed(2);
   valueLabel.textContent = diopters < 0 ? `−${formattedDiopters}` : diopters > 0 ? `+${formattedDiopters}` : "0.00";
   const position = ((diopters + 10) / 20) * 100;
@@ -28,13 +32,7 @@ function updateSimulation() {
   sliderVisual.style.setProperty("--fill-size", `${fillSize}%`);
   sliderVisual.style.setProperty("--thumb-position", `${position}%`);
 
-  // Approximate myopia with increasing blur, mild desaturation, and a small loss of contrast.
-  stage.style.setProperty("--blur", `${(amount * amount * 13).toFixed(1)}px`);
-  stage.style.setProperty("--saturation", `${(1 - amount * 0.18).toFixed(2)}`);
-  stage.style.setProperty("--contrast", `${(1 - amount * 0.09).toFixed(2)}`);
-  const magnification = diopters > 0 ? amount * 0.035 : -amount * 0.02;
-  stage.style.setProperty("--zoom", `${(1 + magnification).toFixed(3)}`);
-
+  depthController?.setDiopters(diopters);
 }
 
 function showToast(message) {
@@ -51,8 +49,13 @@ async function startCamera() {
   }
   startButton.disabled = true;
   startButton.textContent = "Starting camera…";
+  depthController?.stop();
+  depthController = null;
+  stage.classList.remove("is-depth-active", "is-live");
+  stream?.getTracks().forEach((track) => track.stop());
+  stream = null;
+  depthFailed = false;
   try {
-    stream?.getTracks().forEach((track) => track.stop());
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -61,7 +64,11 @@ async function startCamera() {
     await video.play();
     stage.classList.add("is-live");
     stage.classList.toggle("is-front-camera", facingMode === "user");
+    if (Number(slider.value) !== 0) ensureDepthSimulation();
+    else depthStatus.textContent = "Set a diopter value to enable depth-aware blur";
   } catch (error) {
+    stream?.getTracks().forEach((track) => track.stop());
+    stream = null;
     const message = error.name === "NotAllowedError"
       ? "Camera access was denied. Allow camera access in your browser settings."
       : error.name === "NotFoundError"
@@ -74,8 +81,44 @@ async function startCamera() {
   }
 }
 
+async function startDepthSimulation(cameraStream) {
+  depthStatus.textContent = "Loading depth model… first use downloads it";
+  try {
+    const { createDepthEffect } = await import("./depth-effect.js");
+    const controller = await createDepthEffect(
+      video,
+      depthCanvas,
+      () => Number(slider.value),
+      () => facingMode === "user",
+      (message) => { depthStatus.textContent = message; },
+    );
+    if (stream !== cameraStream) {
+      controller.stop();
+      return;
+    }
+    depthController = controller;
+    stage.classList.add("is-depth-active");
+  } catch (error) {
+    console.error("Depth estimation could not start:", error);
+    if (stream === cameraStream) {
+      depthFailed = true;
+      depthStatus.textContent = "Depth model unavailable — check your internet connection";
+    }
+  }
+}
+
+function ensureDepthSimulation() {
+  if (!stream || depthController || depthPromise || depthFailed) return;
+  const cameraStream = stream;
+  depthPromise = startDepthSimulation(cameraStream).finally(() => {
+    depthPromise = null;
+    if (stream && stream !== cameraStream && Number(slider.value) !== 0) ensureDepthSimulation();
+  });
+}
+
 slider.addEventListener("input", () => {
   updateSimulation();
+  if (Number(slider.value) !== 0) ensureDepthSimulation();
   try {
     localStorage.setItem(diopterStorageKey, slider.value);
   } catch {
@@ -138,7 +181,10 @@ themeToggle.addEventListener("click", () => {
     // Theme switching still works for this session without storage.
   }
 });
-window.addEventListener("pagehide", () => stream?.getTracks().forEach((track) => track.stop()));
+window.addEventListener("pagehide", () => {
+  depthController?.stop();
+  stream?.getTracks().forEach((track) => track.stop());
+});
 
 try {
   const savedTheme = localStorage.getItem(themeStorageKey);
