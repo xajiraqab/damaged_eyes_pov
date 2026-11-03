@@ -1,207 +1,86 @@
-const MAX_INFERENCE_EDGE = 336;
-const INFERENCE_INTERVAL_MS = 1800;
-
+const MAX_INFERENCE_EDGE = 518;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-const smoothstep = (edge0, edge1, value) => {
-  const t = clamp((value - edge0) / (edge1 - edge0), 0, 1);
-  return t * t * (3 - 2 * t);
-};
+const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
-export async function createDepthEffect(video, blurVideo, stage, getDiopters, onStatus = () => {}) {
+// One depth pass per still photo. All later slider updates only rebuild a mask,
+// so the browser never has to run inference while the user drags the control.
+export async function createDepthEffect(photoCanvas, blurredPhoto, stage, getDiopters, onStatus = () => {}, signal) {
   const worker = new Worker(new URL("./depth-worker.js", import.meta.url), { type: "module" });
-  const inferenceScale = Math.min(1, MAX_INFERENCE_EDGE / Math.max(video.videoWidth, video.videoHeight));
-  const inferenceWidth = Math.max(14, Math.round(video.videoWidth * inferenceScale / 14) * 14);
-  const inferenceHeight = Math.max(14, Math.round(video.videoHeight * inferenceScale / 14) * 14);
-  const inferenceCanvas = document.createElement("canvas");
-  inferenceCanvas.width = inferenceWidth;
-  inferenceCanvas.height = inferenceHeight;
-  const inferenceContext = inferenceCanvas.getContext("2d", { willReadFrequently: true });
+  const scale = Math.min(1, MAX_INFERENCE_EDGE / Math.max(photoCanvas.width, photoCanvas.height));
+  const width = Math.max(14, Math.round(photoCanvas.width * scale / 14) * 14);
+  const height = Math.max(14, Math.round(photoCanvas.height * scale / 14) * 14);
+  const input = document.createElement("canvas"); input.width = width; input.height = height;
+  const inputContext = input.getContext("2d", { willReadFrequently: true });
+  inputContext.drawImage(photoCanvas, 0, 0, width, height);
+  const pixels = inputContext.getImageData(0, 0, width, height).data;
   const maskCanvas = document.createElement("canvas");
   const maskContext = maskCanvas.getContext("2d");
+  let maskPixels = null; let maskWidth = 0; let maskHeight = 0; let maskUrl = null; let stopped = false;
+  let diopters = Number(getDiopters()) || 0; let version = 0;
+  const report = (message) => { if (!stopped) onStatus(message); };
+  let rejectAbort;
+  const aborted = new Promise((_, reject) => { rejectAbort = reject; });
+  const abort = () => { stopped = true; worker.terminate(); rejectAbort(new Error("Photo processing cancelled")); };
+  if (signal?.aborted) abort();
+  else signal?.addEventListener("abort", abort, { once: true });
 
-  let stopped = false;
-  let inferenceBusy = false;
-  let lastInferenceAt = 0;
-  let relativeDepth = null;
-  let depthWidth = 0;
-  let depthHeight = 0;
-  let smoothedAlpha = null;
-  let diopters = getDiopters();
-  let firstMaskUrl = null;
-  let maskVersion = 0;
-  let lastStatus = "";
-  let resolveFirstDepth;
-  let rejectFirstDepth;
-  let inferenceTimer = 0;
-  let maskUpdateTimer = 0;
-
-  const report = (message) => {
-    if (message !== lastStatus) {
-      lastStatus = message;
-      onStatus(message);
-    }
-  };
-  const firstDepth = new Promise((resolve, reject) => {
-    resolveFirstDepth = resolve;
-    rejectFirstDepth = reject;
+  const depthReady = new Promise((resolve, reject) => {
+    const onError = (event) => { cleanup(); reject(new Error(event.message || "Depth worker failed")); };
+    const cleanup = () => { worker.removeEventListener("message", onMessage); worker.removeEventListener("error", onError); };
+    const onMessage = (event) => {
+      const message = event.data;
+      if (message.type === "status") report(message.message);
+      if (message.type === "progress") report(`Loading depth model… ${Math.round(message.progress)}%`);
+      if (message.type === "error") { cleanup(); reject(new Error(message.message)); }
+      if (message.type === "depth") { cleanup(); maskPixels = new Uint8Array(message.pixels); maskWidth = message.width; maskHeight = message.height; resolve(); }
+    };
+    worker.addEventListener("message", onMessage);
+    worker.addEventListener("error", onError, { once: true });
   });
 
-  function updateBlur() {
-    const amount = Math.abs(diopters) / 10;
-    const radius = Math.pow(amount, 1.15) * 7;
-    stage.style.setProperty("--depth-blur", `${radius.toFixed(2)}px`);
-  }
+  worker.postMessage({ type: "init", preferWebGPU: Boolean(navigator.gpu) });
+  report("Loading depth model on this device…");
+  await Promise.race([new Promise((resolve, reject) => {
+    const onMessage = (event) => {
+      if (event.data.type === "ready") { worker.removeEventListener("message", onMessage); resolve(); }
+      if (event.data.type === "error") { worker.removeEventListener("message", onMessage); reject(new Error(event.data.message)); }
+    };
+    worker.addEventListener("message", onMessage);
+  }), aborted]);
+  if (stopped) { worker.terminate(); throw new Error("Photo was discarded"); }
+  report("Estimating scene depth…");
+  worker.postMessage({ type: "frame", pixels: pixels.buffer, width, height }, [pixels.buffer]);
+  await Promise.race([depthReady, aborted]);
 
   function updateMask() {
-    if (!relativeDepth || diopters === 0) {
-      stage.style.setProperty("--depth-mask", "none");
-      return;
-    }
-
+    if (stopped || !maskPixels) return;
     const amount = Math.abs(diopters) / 10;
-    const count = depthWidth * depthHeight;
-    let min = 255;
-    let max = 0;
-    for (let i = 0; i < count; i += 1) {
-      min = Math.min(min, relativeDepth[i]);
-      max = Math.max(max, relativeDepth[i]);
+    stage.style.setProperty("--depth-blur", `${(amount * 18).toFixed(1)}px`);
+    if (amount === 0) { stage.style.setProperty("--depth-mask", "none"); return; }
+    const image = maskContext.createImageData(maskWidth, maskHeight);
+    // Model values are relative depth, not calibrated distance. Use a broad
+    // transition band so edges blend naturally instead of forming a hard cut.
+    const cutoff = diopters < 0 ? 96 + amount * 42 : 159 - amount * 42;
+    for (let i = 0; i < maskPixels.length; i++) {
+      const near = maskPixels[i];
+      const focus = smoothstep(cutoff - 38, cutoff + 38, near);
+      const alpha = diopters < 0 ? 1 - focus : focus;
+      const o = i * 4; image.data[o] = image.data[o + 1] = image.data[o + 2] = 255;
+      image.data[o + 3] = Math.round(alpha * 255);
     }
-    const span = Math.max(1, max - min);
-    const image = maskContext.createImageData(depthWidth, depthHeight);
-    if (!smoothedAlpha || smoothedAlpha.length !== count) smoothedAlpha = new Float32Array(count);
-    const cutoff = diopters > 0 ? 0.82 - amount * 0.42 : 0.18 + amount * 0.46;
-
-    for (let i = 0; i < count; i += 1) {
-      const nearScore = (relativeDepth[i] - min) / span;
-      const nearWeight = smoothstep(cutoff - 0.06, cutoff + 0.06, nearScore);
-      const target = diopters < 0 ? 1 - nearWeight : nearWeight;
-      const alpha = smoothedAlpha[i] * 0.55 + target * 0.45;
-      smoothedAlpha[i] = alpha;
-      const offset = i * 4;
-      image.data[offset] = 255;
-      image.data[offset + 1] = 255;
-      image.data[offset + 2] = 255;
-      image.data[offset + 3] = Math.round(alpha * 255);
-    }
-
-    maskCanvas.width = depthWidth;
-    maskCanvas.height = depthHeight;
+    maskCanvas.width = maskWidth; maskCanvas.height = maskHeight;
     maskContext.putImageData(image, 0, 0);
-    const version = ++maskVersion;
+    const current = ++version;
     maskCanvas.toBlob((blob) => {
-      if (!blob || stopped || version !== maskVersion || diopters === 0) return;
-      const nextUrl = URL.createObjectURL(blob);
-      const previousUrl = firstMaskUrl;
-      firstMaskUrl = nextUrl;
-      stage.style.setProperty("--depth-mask", `url("${nextUrl}")`);
-      if (previousUrl) setTimeout(() => URL.revokeObjectURL(previousUrl), 1500);
+      if (!blob || stopped || current !== version) return;
+      const next = URL.createObjectURL(blob); const previous = maskUrl; maskUrl = next;
+      stage.style.setProperty("--depth-mask", `url("${next}")`);
+      if (previous) URL.revokeObjectURL(previous);
     }, "image/png");
   }
 
-  function drawInferenceFrame() {
-    inferenceContext.drawImage(video, 0, 0, inferenceWidth, inferenceHeight);
-  }
-
-  function handleWorkerMessage(event) {
-    const message = event.data;
-    if (message.type === "status") report(message.message);
-    if (message.type === "progress") report(`Loading depth model… ${Math.round(message.progress)}%`);
-    if (message.type === "depth") {
-      inferenceBusy = false;
-      relativeDepth = new Uint8Array(message.pixels);
-      depthWidth = message.width;
-      depthHeight = message.height;
-      updateMask();
-      lastInferenceAt = performance.now();
-      report("Depth-aware blur active");
-      resolveFirstDepth?.();
-      resolveFirstDepth = null;
-      rejectFirstDepth = null;
-    }
-    if (message.type === "frame-error") {
-      inferenceBusy = false;
-      report("Depth update paused — retrying");
-      rejectFirstDepth?.(new Error(message.message));
-      rejectFirstDepth = null;
-      resolveFirstDepth = null;
-    }
-    if (message.type === "error") {
-      rejectFirstDepth?.(new Error(message.message));
-      rejectFirstDepth = null;
-      resolveFirstDepth = null;
-    }
-  }
-
-  const modelReady = new Promise((resolve, reject) => {
-    worker.addEventListener("message", function onReady(event) {
-      if (event.data.type === "ready") {
-        worker.removeEventListener("message", onReady);
-        resolve();
-      } else if (event.data.type === "error") {
-        worker.removeEventListener("message", onReady);
-        reject(new Error(event.data.message));
-      } else if (event.data.type === "status") {
-        report(event.data.message);
-      } else if (event.data.type === "progress") {
-        report(`Loading depth model… ${Math.round(event.data.progress)}%`);
-      }
-    });
-    worker.addEventListener("error", (event) => reject(new Error(event.message || "Depth worker failed to start")), { once: true });
-  });
-
-  worker.addEventListener("message", handleWorkerMessage);
-  worker.postMessage({ type: "init", preferWebGPU: Boolean(navigator.gpu) });
-  report("Loading the depth model on this device…");
-  try {
-    await modelReady;
-  } catch (error) {
-    worker.terminate();
-    throw error;
-  }
-
-  function estimateFrame() {
-    if (stopped || inferenceBusy || diopters === 0 || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
-    inferenceBusy = true;
-    drawInferenceFrame();
-    const frame = inferenceContext.getImageData(0, 0, inferenceWidth, inferenceHeight);
-    lastInferenceAt = performance.now();
-    worker.postMessage({ type: "frame", pixels: frame.data.buffer, width: inferenceWidth, height: inferenceHeight }, [frame.data.buffer]);
-  }
-
-  report("Estimating scene depth…");
-  estimateFrame();
-  try {
-    await firstDepth;
-  } catch (error) {
-    worker.terminate();
-    throw error;
-  }
-  if (stopped) {
-    worker.terminate();
-    throw new Error("Depth simulation stopped before startup finished.");
-  }
-
-  inferenceTimer = window.setInterval(() => {
-    if (diopters !== 0 && !inferenceBusy && performance.now() - lastInferenceAt >= INFERENCE_INTERVAL_MS) estimateFrame();
-  }, 250);
-
   return {
-    setDiopters(value) {
-      diopters = Number(value) || 0;
-      updateBlur();
-      clearTimeout(maskUpdateTimer);
-      if (diopters === 0) updateMask();
-      else maskUpdateTimer = window.setTimeout(updateMask, 100);
-      if (diopters !== 0 && !relativeDepth) estimateFrame();
-      else if (diopters !== 0 && performance.now() - lastInferenceAt >= INFERENCE_INTERVAL_MS) estimateFrame();
-    },
-    stop() {
-      stopped = true;
-      clearInterval(inferenceTimer);
-      clearTimeout(maskUpdateTimer);
-      worker.terminate();
-      stage.style.setProperty("--depth-mask", "none");
-      if (firstMaskUrl) URL.revokeObjectURL(firstMaskUrl);
-    },
+    setDiopters(value) { diopters = Number(value) || 0; updateMask(); },
+    stop() { stopped = true; signal?.removeEventListener("abort", abort); worker.terminate(); stage.style.setProperty("--depth-mask", "none"); if (maskUrl) URL.revokeObjectURL(maskUrl); },
   };
 }

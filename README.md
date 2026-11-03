@@ -1,6 +1,6 @@
 # Damaged Eyes POV
 
-A full-screen camera vision simulator that uses on-device relative depth estimation to apply adjustable near/far blur.
+A full-screen camera vision simulator that takes a still photo and uses on-device relative depth estimation to apply adjustable near/far blur.
 
 ## Run locally
 
@@ -10,7 +10,7 @@ Serve this folder with a local web server, then open `index.html` in a browser. 
 py -m http.server 8000
 ```
 
-Camera access requires a secure browser context: use `localhost` on the same device or serve the site over HTTPS. When a non-zero diopter is selected, a quantized depth model downloads from Hugging Face on first use and runs in a web worker; camera frames are not uploaded. Depth masks update periodically while the camera itself stays on the browser's video compositor. The depth map is relative, so the near/far blur is an approximation rather than a measurement in meters. Diopter and theme preferences are saved in the browser's local storage.
+Camera access requires a secure browser context: use `localhost` on the same device or serve the site over HTTPS. Take a photo to reveal the diopter control. A quantized depth model downloads from Hugging Face on first use and estimates scene depth once in a web worker; photos are not uploaded. Slider changes rebuild the blur mask locally without rerunning the model. The depth map is relative, so near/far blur is an approximation rather than a measurement in meters. Diopter and theme preferences are saved in the browser's local storage.
 
 ## Files
 

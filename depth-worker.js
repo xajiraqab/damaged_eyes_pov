@@ -42,7 +42,18 @@ async function estimateFrame({ pixels, width, height }) {
     const rgba = new Uint8ClampedArray(pixels);
     const image = new RawImage(rgba, width, height, 4).rgb();
     const { depth } = await estimator(image);
-    const data = new Uint8Array(depth.data);
+    const source = depth.data;
+    let data;
+    if (source instanceof Uint8Array || source instanceof Uint8ClampedArray) {
+      data = new Uint8Array(source);
+    } else {
+      let min = Infinity;
+      let max = -Infinity;
+      for (const value of source) { min = Math.min(min, value); max = Math.max(max, value); }
+      const range = Math.max(1e-6, max - min);
+      data = new Uint8Array(source.length);
+      for (let i = 0; i < source.length; i += 1) data[i] = Math.round(((source[i] - min) / range) * 255);
+    }
     self.postMessage({
       type: "depth",
       pixels: data.buffer,
