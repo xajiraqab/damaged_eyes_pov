@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#090b10" />
+    <meta name="description" content="Damaged Eyes POV — a visual acuity simulator." />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <title>Damaged Eyes POV</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Georgian:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand"><img src="favicon.svg" alt="" /><span>Damaged Eyes POV</span></div>
+        <div class="header-actions">
+          <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch to light mode" title="Switch to light mode">
+            <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>
+            <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.1A8.6 8.6 0 0 1 8.9 3.8 8.7 8.7 0 1 0 20.2 15.1Z"/></svg>
+          </button>
+          <button class="github-button" id="githubButton" type="button" aria-label="GitHub" title="GitHub">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .9a11.1 11.1 0 0 0-3.51 21.63c.56.1.76-.24.76-.54v-2.1c-3.1.67-3.76-1.32-3.76-1.32-.5-1.3-1.24-1.65-1.24-1.65-1.01-.69.08-.68.08-.68 1.12.08 1.71 1.15 1.71 1.15 1 1.7 2.62 1.21 3.26.92.1-.72.39-1.21.71-1.49-2.48-.28-5.09-1.24-5.09-5.51 0-1.22.44-2.21 1.15-2.99-.12-.28-.5-1.42.11-2.95 0 0 .94-.3 3.05 1.14a10.6 10.6 0 0 1 5.55 0c2.11-1.44 3.05-1.14 3.05-1.14.61 1.53.23 2.67.11 2.95.72.78 1.15 1.77 1.15 2.99 0 4.28-2.61 5.22-5.1 5.5.4.35.76 1.02.76 2.06v3.12c0 .3.2.65.77.54A11.1 11.1 0 0 0 12 .9Z"/></svg>
+          </button>
+        </div>
+      </header>
+      <section class="camera-stage" id="cameraStage" aria-label="Camera view">
+        <video id="camera" playsinline autoplay muted aria-label="Live camera view"></video>
+        <div class="camera-placeholder" id="placeholder">
+          <p>Turn on your camera to start the simulation</p>
+          <button class="start-button" id="startCamera" type="button">Turn on camera</button>
+        </div>
+        <div class="camera-shade" aria-hidden="true"></div>
+      </section>
+      <footer class="control-panel" aria-label="Diopter control">
+        <div class="control-heading"><label for="diopter">Diopter simulation</label><span class="diopter-pill"><span id="diopterValue">−2.00</span><small>D</small></span></div>
+        <div class="slider-wrap">
+          <div class="slider-visual" id="sliderVisual" aria-hidden="true">
+            <span class="slider-base"></span><span class="slider-zero"></span><span class="slider-fill"></span>
+            <span class="slider-thumb" id="sliderThumb"><svg viewBox="0 0 24 24"><path class="eye-shape" d="M2.2 12s3.5-6 9.8-6 9.8 6 9.8 6-3.5 6-9.8 6-9.8-6-9.8-6Z"/><circle class="eye-iris" cx="12" cy="12" r="3.2"/><circle class="eye-pupil" cx="12" cy="12" r="1.35"/></svg></span>
+          </div>
+        <input id="diopter" type="range" min="-10" max="10" step="0.05" value="0" aria-label="Vision diopters" />
+        </div>
+        <div class="range-labels"><span>−10.00 D</span><span>0.00 D</span><span>+10.00 D</span></div>
+      </footer>
+    </main>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
