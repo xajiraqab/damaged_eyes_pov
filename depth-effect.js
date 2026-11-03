@@ -15,8 +15,10 @@ export async function createDepthEffect(photoCanvas, blurredPhoto, stage, getDio
   const pixels = inputContext.getImageData(0, 0, width, height).data;
   const maskCanvas = document.createElement("canvas");
   const maskContext = maskCanvas.getContext("2d");
+  const featherCanvas = document.createElement("canvas");
+  const featherContext = featherCanvas.getContext("2d");
   let maskPixels = null; let maskWidth = 0; let maskHeight = 0; let maskUrl = null; let stopped = false;
-  let diopters = Number(getDiopters()) || 0; let version = 0;
+  let diopters = Number(getDiopters()) || 0; let version = 0; let maskTimer = 0;
   const report = (message) => { if (!stopped) onStatus(message); };
   let rejectAbort;
   const aborted = new Promise((_, reject) => { rejectAbort = reject; });
@@ -55,23 +57,35 @@ export async function createDepthEffect(photoCanvas, blurredPhoto, stage, getDio
   function updateMask() {
     if (stopped || !maskPixels) return;
     const amount = Math.abs(diopters) / 10;
-    stage.style.setProperty("--depth-blur", `${(amount * 18).toFixed(1)}px`);
+    // Blur strength increases nonlinearly with refractive error, like the
+    // growing circle of confusion away from a chosen focus distance.
+    stage.style.setProperty("--depth-blur", `${(Math.pow(amount, 1.35) * 30).toFixed(1)}px`);
     if (amount === 0) { stage.style.setProperty("--depth-mask", "none"); return; }
     const image = maskContext.createImageData(maskWidth, maskHeight);
-    // Model values are relative depth, not calibrated distance. Use a broad
-    // transition band so edges blend naturally instead of forming a hard cut.
+    // Use a narrow depth transition to avoid ghosting from a broad blend of
+    // sharp and blurred copies. Spatial feathering below softens object edges.
     const cutoff = diopters < 0 ? 96 + amount * 42 : 159 - amount * 42;
+    const feather = 8 + amount * 4;
     for (let i = 0; i < maskPixels.length; i++) {
       const near = maskPixels[i];
-      const focus = smoothstep(cutoff - 38, cutoff + 38, near);
+      const focus = smoothstep(cutoff - feather, cutoff + feather, near);
       const alpha = diopters < 0 ? 1 - focus : focus;
       const o = i * 4; image.data[o] = image.data[o + 1] = image.data[o + 2] = 255;
       image.data[o + 3] = Math.round(alpha * 255);
     }
     maskCanvas.width = maskWidth; maskCanvas.height = maskHeight;
     maskContext.putImageData(image, 0, 0);
+    // Upscale the soft depth edge to the captured photo's full resolution
+    // before applying a small spatial feather, avoiding stair-stepped halos.
+    const outputScale = Math.min(1, 1024 / Math.max(photoCanvas.width, photoCanvas.height));
+    featherCanvas.width = Math.round(photoCanvas.width * outputScale);
+    featherCanvas.height = Math.round(photoCanvas.height * outputScale);
+    featherContext.clearRect(0, 0, featherCanvas.width, featherCanvas.height);
+    featherContext.filter = `blur(${Math.max(2, Math.round(featherCanvas.width / 360))}px)`;
+    featherContext.drawImage(maskCanvas, 0, 0, featherCanvas.width, featherCanvas.height);
+    featherContext.filter = "none";
     const current = ++version;
-    maskCanvas.toBlob((blob) => {
+    featherCanvas.toBlob((blob) => {
       if (!blob || stopped || current !== version) return;
       const next = URL.createObjectURL(blob); const previous = maskUrl; maskUrl = next;
       stage.style.setProperty("--depth-mask", `url("${next}")`);
@@ -80,7 +94,12 @@ export async function createDepthEffect(photoCanvas, blurredPhoto, stage, getDio
   }
 
   return {
-    setDiopters(value) { diopters = Number(value) || 0; updateMask(); },
-    stop() { stopped = true; signal?.removeEventListener("abort", abort); worker.terminate(); stage.style.setProperty("--depth-mask", "none"); if (maskUrl) URL.revokeObjectURL(maskUrl); },
+    setDiopters(value) {
+      diopters = Number(value) || 0;
+      clearTimeout(maskTimer);
+      if (diopters === 0) updateMask();
+      else maskTimer = window.setTimeout(updateMask, 45);
+    },
+    stop() { stopped = true; clearTimeout(maskTimer); signal?.removeEventListener("abort", abort); worker.terminate(); stage.style.setProperty("--depth-mask", "none"); if (maskUrl) URL.revokeObjectURL(maskUrl); },
   };
 }

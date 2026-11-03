@@ -83,5 +83,13 @@
       </footer>
     </main>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite" aria-hidden="true">
+      <div class="loading-card">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <p class="loading-title">Preparing your photo</p>
+        <p class="loading-message" id="loadingMessage">Estimating scene depth…</p>
+        <div class="loading-track"><span id="loadingProgress"></span></div>
+      </div>
+    </div>
   </body>
 </html>
