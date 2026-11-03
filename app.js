@@ -10,6 +10,7 @@ const depthStatus = document.querySelector("#depthStatus");
 const loadingOverlay = document.querySelector("#loadingOverlay");
 const loadingMessage = document.querySelector("#loadingMessage");
 const loadingProgress = document.querySelector("#loadingProgress");
+const focusIndicator = document.querySelector("#focusIndicator");
 const startButton = document.querySelector("#startCamera");
 const captureButton = document.querySelector("#capturePhoto");
 const retakeButton = document.querySelector("#retakePhoto");
@@ -31,6 +32,7 @@ let photoFrame = null;
 let photoUrl = null;
 let captureVersion = 0;
 let toastTimer;
+let focusTimer;
 
 function updateSimulation() {
   const diopters = Number(slider.value);
@@ -88,7 +90,7 @@ async function startCamera() {
     await video.play();
     stage.classList.add("is-live");
     stage.classList.toggle("is-front-camera", facingMode === "user");
-    depthStatus.textContent = "Frame your shot, then take a photo";
+    depthStatus.textContent = "";
   } catch (error) {
     stream?.getTracks().forEach((track) => track.stop()); stream = null;
     const message = error.name === "NotAllowedError"
@@ -164,6 +166,49 @@ function ensureDepthSimulation() {
 
 captureButton.addEventListener("click", capturePhoto);
 retakeButton.addEventListener("click", startCamera);
+video.addEventListener("pointerdown", (event) => {
+  if (!stream || !stage.classList.contains("is-live")) return;
+  const bounds = stage.getBoundingClientRect();
+  const sensorWidth = video.videoWidth;
+  const sensorHeight = video.videoHeight;
+  if (!sensorWidth || !sensorHeight) return;
+
+  // Map the tapped preview position back through object-fit: cover and the
+  // mirrored selfie preview to normalized sensor coordinates.
+  const previewWidth = bounds.width * 1.06;
+  const previewHeight = bounds.height * 1.06;
+  const renderedWidth = Math.max(previewWidth / sensorWidth, previewHeight / sensorHeight) * sensorWidth;
+  const renderedHeight = Math.max(previewWidth / sensorWidth, previewHeight / sensorHeight) * sensorHeight;
+  let x = (event.clientX - bounds.left + (renderedWidth - bounds.width) / 2) / renderedWidth;
+  const y = (event.clientY - bounds.top + (renderedHeight - bounds.height) / 2) / renderedHeight;
+  if (facingMode === "user") x = 1 - x;
+  x = Math.max(0, Math.min(1, x));
+  const normalizedY = Math.max(0, Math.min(1, y));
+
+  focusIndicator.style.left = `${event.clientX - bounds.left}px`;
+  focusIndicator.style.top = `${event.clientY - bounds.top}px`;
+  focusIndicator.classList.remove("is-visible");
+  void focusIndicator.offsetWidth;
+  focusIndicator.classList.add("is-visible");
+  clearTimeout(focusTimer);
+  focusTimer = window.setTimeout(() => focusIndicator.classList.remove("is-visible"), 750);
+
+  // Point-of-interest autofocus is exposed only by some browser/camera pairs.
+  // Keep the visual tap feedback even when the device manages focus itself.
+  const track = stream.getVideoTracks()[0];
+  try {
+    const supported = navigator.mediaDevices.getSupportedConstraints?.() || {};
+    if (!supported.pointsOfInterest || !track?.applyConstraints) return;
+    const capabilities = track.getCapabilities?.() || {};
+    const modes = capabilities.focusMode || [];
+    const advanced = { pointsOfInterest: [{ x, y: normalizedY }] };
+    if (modes.includes("single-shot")) advanced.focusMode = "single-shot";
+    else if (modes.includes("continuous")) advanced.focusMode = "continuous";
+    track.applyConstraints({ advanced: [advanced] }).catch(() => {});
+  } catch {
+    // Unsupported focus controls fall back to the camera's automatic focus.
+  }
+});
 slider.addEventListener("input", () => {
   updateSimulation();
   try { localStorage.setItem(diopterStorageKey, slider.value); } catch { /* Keep the control usable without storage. */ }
